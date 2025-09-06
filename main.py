@@ -1,16 +1,29 @@
 import matplotlib.pyplot as plt
-import numpy as np
 
-# Grid dimensions
-rows, cols = 40, 400
-grid = np.zeros((rows, cols))
+rows, cols = 4, 40
 
-plt.figure(figsize=(20, 3))  # make it wide and not too tall
-plt.imshow(grid, cmap="Greys", interpolation="none")
+fig, ax = plt.subplots(figsize=(24, 3), dpi=200)  # más ancho y nítido
+ax.axis('off')  # ocultar ejes
 
-# Add grid lines
-plt.xticks(np.arange(-0.5, cols, 1), [])
-plt.yticks(np.arange(-0.5, rows, 1), [])
-plt.grid(color='black', linewidth=0.2)
+# Construir los textos de cada celda (fila, columna)
+cell_text = [[f"{i},{j}" for j in range(cols)] for i in range(rows)]
 
+# Crear la tabla
+table = ax.table(
+    cellText=cell_text,
+    cellLoc='center',
+    loc='center',
+)
+
+# Ajustar proporciones de celdas y fuente
+table.scale(1, 1.6)              # alto de celdas
+for key, cell in table.get_celld().items():
+    cell.set_edgecolor('black')  # bordes visibles
+    cell.set_linewidth(0.5)
+
+# Tamaño de letra: si se ve apretado, baja a 5 o sube a 7
+for (i, j), cell in table.get_celld().items():
+    cell.get_text().set_fontsize(6)
+
+plt.tight_layout()
 plt.show()
