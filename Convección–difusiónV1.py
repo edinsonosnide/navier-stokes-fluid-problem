@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-Convección + difusión estacionaria en 2D (malla 8x80) con obstáculos.
-Ecuación: - (Vx*du/dx + Vy*du/dy) + nu * Laplaciano(u) = 0
+Convección–difusión estacionaria 2D en malla 8x80 con obstáculos.
+Ecuación:  - (Vx * du/dx + Vy * du/dy) + nu * (d2u/dx2 + d2u/dy2) = 0
 
-BCs:
-  - x=0, x=Nx-1: Neumann du/dx = 0
-  - y=0, y=Ny-1: Neumann du/dy = v0 (activables)
-  - Obstáculo: u = 0 implícito (no deslizamiento)
-  - Se fija un "ancla" u=0 para evitar singularidad con Neumann puro
+BCs (según figura):
+  - Surface G (y=0)     : Neumann  du/dy = V0_TOP
+  - Inlet F   (x=0)     : Neumann  du/dx = 0
+  - Outlet H  (x=Nx-1)  : Neumann  du/dx = 0
+  - Base E–A  (y=Ny-1)  : Dirichlet u = 0
+  - Obstáculos          : Dirichlet u = 0
 
 Convección:
-  - Modo "burgers": Vx = u (no lineal); Vy = VY_CONST o un campo dado.
-  - Modo "const":    Vx = VX_CONST, Vy = VY_CONST (lineal).
+  - Modo "const"  : Vx=VX_CONST, Vy=VY_CONST (lineal)
+  - Modo "burgers": Vx=u (no lineal), Vy=VY_CONST
 
-Método:
-  - Newton–Raphson con Jacobiano numérico por diferencias finitas (robusto).
+Método: Newton–Raphson con Jacobiano numérico (robusto para 8×80).
 """
 
 import numpy as np
@@ -31,50 +31,39 @@ except Exception:
 # ---------------------------
 Ny, Nx = 8, 80
 dx = dy = 1.0
-nu = 1.0                 # difusividad/viscosidad efectiva
-v0 = 1.0                 # gradiente impuesto en y (du/dy = v0) en las fronteras superior/inferior
-apply_top_neumann    = True   # y = 0
-apply_bottom_neumann = True   # y = Ny-1
+nu = 0.5                # difusividad/viscosidad
 
-# Convección: elige el modo
-#   "burgers" => Vx = u (no lineal), Vy = VY_CONST
-#   "const"   => Vx = VX_CONST, Vy = VY_CONST
-VX_MODE  = "burgers"      # "burgers" o "const"
-VX_CONST = 0.0
+# Convección
+VX_MODE  = "const"        # "const" o "burgers"
+VX_CONST = 1.0            # usado si VX_MODE="const"
 VY_CONST = 0.0
 
-# ------------------------------------------------
-# 2) Define la malla/obstáculos (array 2D 0/1)
-#    1 = FLUIDO, 0 = OBSTÁCULO
-# ------------------------------------------------
-FLUID_01 = [
-    [1]*80,  # i = 0
-    [1]*80,  # i = 1
-    [1]*80,  # i = 2
-    [1]*80,  # i = 3
-    [1]*80,  # i = 4
-    [1]*80,  # i = 5
-    [1]*80,  # i = 6
-    [1]*80,  # i = 7
-]
+# Gradiente en el techo (Surface G)
+V0_TOP = 1.0             # impone du/dy = V0_TOP en y=0
 
-# Obstáculo 1: i=1..2, j=24..33
+# ---------------------------
+# 2) Máscara de fluido / obstáculo (1/0)
+# ---------------------------
+FLUID_01 = [[1]*Nx for _ in range(Ny)]
+
+# >>> EDITA aquí tus obstáculos (ejemplos):
+# obstáculo alto-derecha (demo)
 for i in range(0, 4):
     for j in range(70, 80):
         FLUID_01[i][j] = 0
-# Obstáculo 2: i=4..5, j=52..59
+# obstáculo bajo-centro (demo)
 for i in range(4, 8):
     for j in range(34, 44):
         FLUID_01[i][j] = 0
 
 fluid_mask = np.array(FLUID_01, dtype=bool)
 if not fluid_mask.any():
-    raise RuntimeError("No hay celdas de fluido.")
+    raise RuntimeError("No hay celdas de fluido en la malla.")
 is_obstacle = ~fluid_mask
 
-# ------------------------------------------------
-# 3) Mapeo 2D <-> 1D solo en celdas de FLUIDO
-# ------------------------------------------------
+# ---------------------------
+# 3) Mapeo 2D <-> 1D en fluido
+# ---------------------------
 ij_to_k = -np.ones((Ny, Nx), dtype=int)
 k_to_ij = []
 for i in range(Ny):
@@ -85,68 +74,71 @@ for i in range(Ny):
 k_to_ij = np.array(k_to_ij, dtype=int)
 nunk = len(k_to_ij)
 if nunk == 0:
-    raise RuntimeError("No hay incógnitas (fluido).")
+    raise RuntimeError("No hay incógnitas (todo es obstáculo).")
 
-anchor_k = 0  # fija u=0 en esta celda para evitar singularidad
+# Hay Dirichlet en la base → NO necesitamos ancla (el sistema ya es no singular)
+anchor_k = None
 
-# ------------------------------------------------
-# 4) Utilidades: vecinos + ghost/BC handling
-# ------------------------------------------------
+# ---------------------------
+# 4) Ghosts (2º orden) para BCs
+# ---------------------------
+def ghost_dirichlet(uP, u_b):
+    # segundo orden: u_ghost = 2 u_b - u_P
+    return 2.0*u_b - uP
+
+def ghost_neumann_left(uP, gx):
+    # (uP - uGhost)/dx = gx  -> uGhost = uP - gx*dx
+    return uP - gx*dx
+
+def ghost_neumann_right(uP, gx):
+    # (uGhost - uP)/dx = gx  -> uGhost = uP + gx*dx
+    return uP + gx*dx
+
+def ghost_neumann_vertical(uP, gy):
+    # (uGhost - uP)/dy = gy  -> uGhost = uP + gy*dy
+    return uP + gy*dy
+
+# valores de borde (según figura)
+LEFT_gx  = 0.0      # du/dx=0 en inlet
+RIGHT_gx = 0.0      # du/dx=0 en outlet
+TOP_gy   = V0_TOP   # du/dy=V0_TOP en techo
+BOT_u    = 0.0      # u=0 en base
+
 def get_u_at(i, j, u_vec):
-    """ Devuelve u en (i,j) manejando:
-        - Obstáculo: u=0 (Dirichlet implícita)
-        - Fuera del dominio: usa ghost por Neumann (ver más abajo)
-        - Fluido: toma de u_vec con mapeo ij_to_k
-    """
+    """u(i,j) considerando fluido/obstáculo y BCs via ghosts."""
     # Dentro del dominio
     if 0 <= i < Ny and 0 <= j < Nx:
         if fluid_mask[i, j]:
             return u_vec[ij_to_k[i, j]]
         else:
-            return 0.0  # obstáculo
-    # Fuera del dominio -> ghost segun BC
-    # Para x: du/dx = 0 -> u_ghost = uP
-    if j < 0:   # a la izquierda (x=0)
-        jP = 0
-        if fluid_mask[i, jP]:
-            return u_vec[ij_to_k[i, jP]]
-        else:
-            return 0.0
-    if j >= Nx:  # a la derecha (x=Nx-1)
-        jP = Nx-1
-        if fluid_mask[i, jP]:
-            return u_vec[ij_to_k[i, jP]]
-        else:
-            return 0.0
-    # Para y: du/dy = v0 -> u_ghost = uP -/+ v0*dy
-    if i < 0:   # arriba (y=0)
-        iP = 0
-        if not fluid_mask[iP, j]:
-            return 0.0
-        up = u_vec[ij_to_k[iP, j]]
-        if apply_top_neumann:
-            # uNghost = uP + v0*dy  (signo corregido)
-            return up + v0 * dy
-        else:
-            # si no aplica Neumann, tratamos como pared: u=0
-            return 0.0
-    if i >= Ny:  # abajo (y=Ny-1)
-        iP = Ny-1
-        if not fluid_mask[iP, j]:
-            return 0.0
-        up = u_vec[ij_to_k[iP, j]]
-        if apply_bottom_neumann:
-            # uSghost = uP + v0*dy
-            return up + v0 * dy
-        else:
-            return 0.0
-    # debería estar cubierto todo
-    return 0.0
+            return 0.0  # obstáculo: no deslizamiento
+
+    # Fuera del dominio: aplicar BCs del lado correspondiente
+    if j < 0:  # izquierda (x=0): Neumann du/dx=0
+        iP, jP = i, 0
+        uP = 0.0 if not (0 <= iP < Ny and fluid_mask[iP, jP]) else u_vec[ij_to_k[iP, jP]]
+        return ghost_neumann_left(uP, LEFT_gx)
+
+    if j >= Nx:  # derecha (x=Nx-1): Neumann du/dx=0
+        iP, jP = i, Nx-1
+        uP = 0.0 if not (0 <= iP < Ny and fluid_mask[iP, jP]) else u_vec[ij_to_k[iP, jP]]
+        return ghost_neumann_right(uP, RIGHT_gx)
+
+    if i < 0:  # techo (y=0): Neumann du/dy=V0_TOP
+        iP, jP = 0, j
+        uP = 0.0 if not (0 <= jP < Nx and fluid_mask[iP, jP]) else u_vec[ij_to_k[iP, jP]]
+        return ghost_neumann_vertical(uP, TOP_gy)
+
+    if i >= Ny:  # base (y=Ny-1): Dirichlet u=0
+        iP, jP = Ny-1, j
+        uP = 0.0 if not (0 <= jP < Nx and fluid_mask[iP, jP]) else u_vec[ij_to_k[iP, jP]]
+        return ghost_dirichlet(uP, BOT_u)
+
+    raise RuntimeError("Índice fantasma inesperado.")
 
 def convective_velocities(u_vec):
-    """ Devuelve campos Vx, Vy en todo el dominio (solo usamos en nodos de fluido). """
+    """Campos de velocidad convectiva (para el término advectivo)."""
     if VX_MODE.lower() == "burgers":
-        # Vx = u (no lineal)
         Vx = np.zeros((Ny, Nx))
         for i, j in k_to_ij:
             Vx[i, j] = u_vec[ij_to_k[i, j]]
@@ -156,23 +148,15 @@ def convective_velocities(u_vec):
         Vy = np.full((Ny, Nx), VY_CONST, dtype=float)
     return Vx, Vy
 
-# ------------------------------------------------
-# 5) Residual F(u) del sistema no lineal
-# ------------------------------------------------
+# ---------------------------
+# 5) Residual F(u)
+# ---------------------------
 def build_residual(u_vec):
-    """
-    F_k = - (Vx*du/dx + Vy*du/dy) + nu * Laplaciano(u)
-    con BCs y obstáculos incorporados vía get_u_at.
-    """
     Vx, Vy = convective_velocities(u_vec)
     F = np.zeros(nunk)
 
     for kk, (i, j) in enumerate(k_to_ij):
-        if kk == anchor_k:
-            F[kk] = u_vec[kk]  # ancla u=0
-            continue
-
-        # Vecinos con ghosts/obstáculos
+        # (no ancla porque hay Dirichlet en la base)
         uP = get_u_at(i, j, u_vec)
         uW = get_u_at(i, j-1, u_vec)
         uE = get_u_at(i, j+1, u_vec)
@@ -180,30 +164,24 @@ def build_residual(u_vec):
         uS = get_u_at(i+1, j, u_vec)
 
         # Gradientes centrados
-        du_dx = (uE - uW) / (2.0 * dx)
-        du_dy = (uS - uN) / (2.0 * dy)
+        du_dx = (uE - uW) / (2.0*dx)
+        du_dy = (uS - uN) / (2.0*dy)
 
-        # Laplaciano 5-pt
-        lap = (uE + uW + uN + uS - 4.0 * uP) / (dx*dy/dy)  # dx=dy -> /1 ; lo dejo explícito
+        # Laplaciano (d2u/dx2 + d2u/dy2)
+        lap = (uE - 2.0*uP + uW)/(dx*dx) + (uN - 2.0*uP + uS)/(dy*dy)
 
         # Convección
-        vx = Vx[i, j]
-        vy = Vy[i, j]
-        conv = vx * du_dx + vy * du_dy
+        vx = Vx[i, j]; vy = Vy[i, j]
+        conv = vx*du_dx + vy*du_dy
 
-        # Residual
-        F[kk] = -conv + nu * lap
+        F[kk] = -conv + nu*lap
 
     return F
 
-# ------------------------------------------------
-# 6) Jacobiano numérico (diferencias finitas)
-# ------------------------------------------------
+# ---------------------------
+# 6) Jacobiano numérico
+# ---------------------------
 def build_jacobian_numeric(u_vec, eps=1e-8):
-    """
-    Jacobiano J ~ dF/du (nunk x nunk) por diferencias finitas hacia adelante.
-    Para 8x80 es viable; es claro y robusto.
-    """
     F0 = build_residual(u_vec)
     J = np.zeros((nunk, nunk))
     for q in range(nunk):
@@ -214,9 +192,9 @@ def build_jacobian_numeric(u_vec, eps=1e-8):
         J[:, q] = (Fq - F0) / du
     return J
 
-# ------------------------------------------------
-# 7) Newton–Raphson con damping (opcional)
-# ------------------------------------------------
+# ---------------------------
+# 7) Newton–Raphson (con backtracking)
+# ---------------------------
 def newton_solve(u0, max_iter=30, tol=1e-10, damping=True):
     u = u0.copy()
     for it in range(max_iter):
@@ -229,52 +207,51 @@ def newton_solve(u0, max_iter=30, tol=1e-10, damping=True):
         J = build_jacobian_numeric(u)
         rhs = -F
 
-        # Resolver
         if SCIPY_OK:
             delta = spla.spsolve(J, rhs)
         else:
             delta = np.linalg.solve(J, rhs)
 
-        # Paso con damping si conviene
         alpha = 1.0
         if damping:
-            # backtracking simple
             for _ in range(10):
-                u_try = u + alpha * delta
+                u_try = u + alpha*delta
                 r_try = np.linalg.norm(build_residual(u_try), ord=np.inf)
-                if r_try <= (1 - 1e-3 * alpha) * res:
+                if r_try <= (1 - 1e-3*alpha) * res:
                     u = u_try
                     break
                 alpha *= 0.5
             else:
-                # si no mejora, acepta paso completo igualmente (para no estancarse)
                 u = u + delta
         else:
             u = u + delta
     return u
 
-# ------------------------------------------------
+# ---------------------------
 # 8) Ejecutar solver
-# ------------------------------------------------
-u0 = np.zeros(nunk)          # arranque
+# ---------------------------
+# Arranque: algo suave compatible con base u=0 (p. ej., cero)
+u0 = np.zeros(nunk)
 u  = newton_solve(u0, max_iter=25, tol=1e-10, damping=True)
 
-# ------------------------------------------------
-# 9) Reconstrucción y visualización
-# ------------------------------------------------
+# ---------------------------
+# 9) Reconstrucción y gráficos
+# ---------------------------
 U = np.full((Ny, Nx), np.nan)
 for kk, (i, j) in enumerate(k_to_ij):
     U[i, j] = u[kk]
 
 plt.figure(figsize=(12, 3.2))
 im = plt.imshow(U, origin="upper", aspect="auto", cmap="viridis")
-plt.title("Convección–difusión: u(x,y) (NaN = obstáculo)")
+plt.title("Convección–difusión con BCs del esquema (NaN = obstáculo)")
 plt.xlabel("x (col)"); plt.ylabel("y (fila)")
 plt.colorbar(im, label="u")
 plt.tight_layout(); plt.show()
 
 plt.figure(figsize=(12, 1.8))
-plt.imshow(fluid_mask, origin="upper", aspect="auto", cmap="gray_r")
+plt.imshow(fluid_mask, origin="upper", aspect="auto", cmap="gray")
 plt.title("Máscara de fluido (blanco) vs obstáculo (negro)")
 plt.xlabel("x"); plt.ylabel("y")
 plt.tight_layout(); plt.show()
+
+print(fluid_mask)
