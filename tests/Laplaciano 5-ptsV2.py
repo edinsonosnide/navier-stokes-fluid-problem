@@ -42,7 +42,7 @@ if dx <= 0 or dy <= 0:
 # Gradientes Neumann y valor Dirichlet
 LEFT_gx  = 0.0     # du/dx en x=0
 RIGHT_gx = 0.0     # du/dx en x=Nx-1
-V0_TOP   = -1.0     # du/dy en y=0
+V0_TOP   = -1     # du/dy en y=0
 BOT_u    = 0.0     # u en y=Ny-1
 
 # ---------------------------
