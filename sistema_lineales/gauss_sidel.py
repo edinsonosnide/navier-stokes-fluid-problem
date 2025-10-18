@@ -7,107 +7,126 @@ import time
 
 import numpy as np
 
-def analyze_matrix_for_jacobi(A):
+def analyze_matrix_for_gauss_seidel(A):
+    """
+    Análisis compacto para Gauss–Seidel.
+    Convergencia ⇔ ρ(G_GS) < 1, donde
+        G_GS = -(D+L)^{-1} U
+    y A = D + L + U (D: diagonal, L: estrictamente inferior, U: estrictamente superior).
+
+    También son condiciones suficientes:
+      • A simétrica definida positiva (SPD) → converge.
+      • A diagonalmente dominante por filas (estricta, o débil con ≥1 estricta) → converge.
+    """
     A = np.array(A, dtype=float)
     n, m = A.shape
     if n != m:
-        raise ValueError("Jacobi requiere A cuadrada.")
+        raise ValueError("Gauss–Seidel requiere A cuadrada.")
 
     # 1) Chequeos rápidos
     is_symmetric = np.allclose(A, A.T, atol=1e-10)
     diag = np.diag(A)
     has_zero_on_diagonal = np.any(np.isclose(diag, 0.0))
 
-    # 2) Dominancia diagonal por filas (suficiente para convergencia)
+    # SPD por Cholesky (garantía fuerte)
+    try:
+        np.linalg.cholesky(A)
+        is_spd = True
+    except np.linalg.LinAlgError:
+        is_spd = False
+
+    # 2) Dominancia diagonal por filas (suficiente)
     absA = np.abs(A)
     abs_diag = np.abs(diag)
     row_offdiag_sum = np.sum(absA, axis=1) - abs_diag
-    is_row_strictly_diagonally_dominant = np.all(abs_diag > row_offdiag_sum)
-    is_row_weak_dd_with_one_strict = np.all(abs_diag >= row_offdiag_sum) and np.any(abs_diag > row_offdiag_sum)
+    dd_strict = np.all(abs_diag > row_offdiag_sum)
+    dd_weak_one_strict = np.all(abs_diag >= row_offdiag_sum) and np.any(abs_diag > row_offdiag_sum)
 
-    print("---- Análisis para Jacobi ----")
+    print("---- Análisis para Gauss–Seidel ----")
     print(f"Simétrica: {is_symmetric}")
+    print(f"Definida positiva (Cholesky): {is_spd}")
     print(f"Ceros en la diagonal: {has_zero_on_diagonal}")
-    print(f"Dominancia diagonal por filas (estricta): {is_row_strictly_diagonally_dominant}")
-    print(f"Dominancia diagonal por filas (débil con ≥1 estricta): {is_row_weak_dd_with_one_strict}")
+    print(f"Dominancia diagonal por filas (estricta): {dd_strict}")
+    print(f"Dominancia diagonal por filas (débil con ≥1 estricta): {dd_weak_one_strict}")
 
     if has_zero_on_diagonal:
-        print("❌ Jacobi no aplicable: D^{-1} no existe (ceros en la diagonal).")
+        print("❌ Gauss–Seidel problemático: (D+L) puede ser singular (a_{ii}=0).")
         return
 
-    # 3) Matriz de iteración T = I - D^{-1}A  (Jacobi converge si ρ(T) < 1)
-    D_inv = np.diag(1.0 / diag)
-    T = np.eye(n) - (D_inv @ A)
-
-    # 4) Indicadores: normas fáciles y radio espectral exacto (para tamaños moderados)
-    T_inf_norm = np.max(np.sum(np.abs(T), axis=1))  # cota de ρ(T)
-    T_one_norm = np.max(np.sum(np.abs(T), axis=0))  # cota de ρ(T)
+    # 3) Matriz de iteración de GS: G_GS = -(D+L)^{-1} U
+    D_plus_L = np.tril(A)        # D + L
+    U = A - D_plus_L             # U
     try:
-        spectral_radius = np.max(np.abs(np.linalg.eigvals(T)))
+        # Usamos solve para no invertir explícitamente (más estable, mismo resultado analítico)
+        # Equivalente a: G = -inv(D+L) @ U
+        G = -np.linalg.solve(D_plus_L, U)
+    except np.linalg.LinAlgError:
+        print("⚠️ No se pudo factorizar (D+L). Revisa singularidad o reordenamiento de A.")
+        return
+
+    # 4) Indicadores: normas (cotas) y radio espectral exacto (si es computable)
+    G_inf = np.max(np.sum(np.abs(G), axis=1))
+    G_one = np.max(np.sum(np.abs(G), axis=0))
+    try:
+        spectral_radius = float(np.max(np.abs(np.linalg.eigvals(G))))
     except np.linalg.LinAlgError:
         spectral_radius = np.nan
 
-    print(f"||T||_∞: {T_inf_norm:.6e}")
-    print(f"||T||_1: {T_one_norm:.6e}")
-    print(f"ρ(T) (exacto si eigs disponibles): {spectral_radius:.6e}")
+    print(f"||G||_∞: {G_inf:.6e}")
+    print(f"||G||_1: {G_one:.6e}")
+    print(f"ρ(G) (exacto si eigs disponibles): {spectral_radius:.6e}")
 
     # 5) Veredicto simple
-    if np.isfinite(spectral_radius) and spectral_radius < 1.0:
-        print("✅ Jacobi: criterio espectral cumple (ρ(T) < 1) → Convergencia esperada.")
-    elif (T_inf_norm < 1.0) or (T_one_norm < 1.0) or is_row_strictly_diagonally_dominant or is_row_weak_dd_with_one_strict:
-        print("✅ Jacobi: se cumple al menos una condición suficiente/cota (convergencia probable).")
+    if is_spd:
+        print("✅ GS: A es SPD → Convergencia garantizada.")
+    elif np.isfinite(spectral_radius) and spectral_radius < 1.0:
+        print("✅ GS: criterio espectral cumple (ρ(G) < 1) → Convergencia esperada.")
+    elif (G_inf < 1.0) or (G_one < 1.0) or dd_strict or dd_weak_one_strict:
+        print("✅ GS: se cumple al menos una condición suficiente/cota (convergencia probable).")
     else:
-        print("⚠️ Jacobi: no hay garantía clara de convergencia (considera Gauss–Seidel o SOR).")
+        print("⚠️ GS: no hay garantía clara de convergencia (considera SOR o reordenar/escalar A).")
+
 
 
 # ==========================
-# Jacobi (n x n)
+# Gauss-Seidel (n x n)
 # ==========================
-def jacobi(A, b, x0, tolerance, max_iter=500, on_iter=None):
+def gauss_seidel(A, b, x0, tolerance, max_iter=500, on_iter=None):
     r"""
-    Método de Jacobi para Ax=b.
-
-    Fórmulas matriciales:
-    ---------------------
-    Descomposición: A = D + L + U, con:
-      - D: diagonal(A)
-      - L: parte estrictamente inferior
-      - U: parte estrictamente superior
-
-    **Iteración de Jacobi:**
-        x^{(k+1)} = D^{-1} [ b - (L + U) x^{(k)} ]
-
-    Implementación:
-    ---------------
-    - Calculamos D, R := L + U = A - D
-    - Usamos D_inv @ (b - R @ x) para actualizar x.
+    Gauss–Seidel en forma matricial:
+        x^{(k)} = (D + L)^{-1} ( b - U x^{(k-1)} )
+    con A = D + L + U.
     """
-
     A, b, x = _validate_inputs(A, b, x0)
-    D = np.diag(np.diag(A))       # D
-    R = A - D                     # L + U
-    D_inv = np.diag(1.0 / np.diag(D))  # D^{-1}
+
+    D_plus_L = np.tril(A)        # D + L (triangular inferior con diagonal)
+    U = A - D_plus_L             # U (estrictamente superior)
+
+    try:
+        D_plus_L_inv = np.linalg.inv(D_plus_L)  # inversion explícita
+    except np.linalg.LinAlgError as e:
+        raise np.linalg.LinAlgError(
+            "Gauss–Seidel: (D+L) es singular; no se puede invertir."
+        ) from e
 
     t0 = time.perf_counter()
     elapsed = 0
     residual_norm = None
 
     for k in range(1, max_iter + 1):
-        # x^{(k+1)} = D^{-1} (b - (L+U) x^{(k)})
-        x_new = D_inv @ (b - R @ x)
+        rhs = b - (U @ x)                    # b - U x^{(k-1)}
+        x_new = D_plus_L_inv @ rhs           # (D+L)^{-1} rhs
 
         less_than_tolerance, residual_norm = _stopped(A, b, x_new, tolerance)
-
         elapsed = time.perf_counter() - t0
 
-        # Callback de usuario (por ejemplo, para actualizar gráfico)
         if on_iter is not None:
             on_iter(k, x_new, residual_norm, elapsed)
 
         if less_than_tolerance:
             return x_new, k, residual_norm, elapsed
-        x = x_new
 
+        x = x_new
 
     return x, max_iter, residual_norm, elapsed
 
@@ -177,10 +196,10 @@ if __name__ == "__main__":
         title="Matrix values"
     )
 
-    analyze_matrix_for_jacobi(jacobian_numeric)
+    analyze_matrix_for_gauss_seidel(jacobian_numeric)
 
     # Ejecutar Jacobi llamando al plotter en cada iteración
-    x_j, it_j, residual_norm, elapsed = jacobi(
+    x_j, it_j, residual_norm, elapsed = gauss_seidel(
         A=jacobian_numeric,
         b=rhs,
         x0=vector_x_initial,
@@ -189,8 +208,8 @@ if __name__ == "__main__":
         on_iter=plotter.update     # <- aquí la magia
     )
 
-    print(f"Jacobi: iter={it_j}, || b - A * x_current ||_2={residual_norm}, time={elapsed:.2f}s")
+    print(f"gauss_seidel: iter={it_j}, || b - A * x_current ||_2={residual_norm}, time={elapsed:.2f}s")
 
-    # Actualización final (por si quieres asegurar último frame) y mostrar bloqueante
+    # Actualización final y mostrar bloqueante en último frame
     plotter.update(it_j, x_j, residual_norm, elapsed)
     plotter.show_blocking()
