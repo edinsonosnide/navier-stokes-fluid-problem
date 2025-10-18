@@ -193,7 +193,9 @@ if __name__ == "__main__":
 
     # Parámetro de relajación del método de Richardson.
     # Ajusta este valor si ves que converge muy lento (sube un poco) o diverge/oscila (bájalo).
-    relaxation_parameter_omega = 1
+    relaxation_parameter_omega = 0.5
+
+    print(f'Relaxation parameter omega: {relaxation_parameter_omega}')
 
     analyze_matrix_for_richardson(jacobian_numeric)
 
@@ -204,7 +206,7 @@ if __name__ == "__main__":
         tolerance=tolerance,
         relaxation_parameter_omega=relaxation_parameter_omega,
         max_iter=2000,
-        on_iter=plotter.update  # <- tu visualización en vivo
+        on_iter=plotter.update  # <- visualización en vivo
     )
 
     print(
