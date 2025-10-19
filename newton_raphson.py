@@ -218,21 +218,21 @@ def newton_rapshon(matrix_height, matrix_width, vector_x_initial, matrix_grid_na
 
         # the algorithm should stop?
         delta_vector_step = np.array(vector_solution_next_iteration, dtype=float) - np.array(vector_x_current_iteration,dtype=float)
-        tau_absolute = 1e-8
+        tau_absolute = 1e-5
         step_norm_L2 = np.linalg.norm(delta_vector_step, ord=2)
         if step_norm_L2 < tau_absolute:
             print(f'Stop because of small step: {step_norm_L2:.8e} < {tau_absolute:.8e} (iter {current_iter+1})') 
             # update drawing
             image.set_data(matrix_grid_numeric_current_iteration)
-            title.set_text(f'Valores de la matrix - iter (final) {current_iter+1} - Step norm delta {step_norm_L2:.8e} ')
+            title.set_text(f'Valores de la matriz - iter (final) {current_iter+1} - Step norm delta {step_norm_L2:.8e} ')
             plt.pause(1)
             break
         else:
             print(f'step: {step_norm_L2:.8e}, (iter {current_iter+1})')
             # update drawing
             image.set_data(matrix_grid_numeric_current_iteration)
-            title.set_text(f'Valores de la matrix - iter {current_iter+1} - Step norm delta {step_norm_L2:.8e} ')
-            plt.pause(1)
+            title.set_text(f'Valores de la matriz - iter {current_iter+1} - Step norm delta {step_norm_L2:.8e} ')
+            plt.pause(0.00001)
 
 
         # update vector x

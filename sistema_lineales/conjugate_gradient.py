@@ -243,7 +243,7 @@ if __name__ == "__main__":
         b=rhs,
         x0=vector_x_initial,
         tolerance=tolerance,
-        max_iter=2000,
+        max_iter=12000,
         on_iter=plotter.update  # <- visualización en vivo
     )
 
