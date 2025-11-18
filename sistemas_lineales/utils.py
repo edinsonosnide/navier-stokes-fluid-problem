@@ -73,7 +73,7 @@ def _stopped(A: List[List[float]], b: List[float], x_current: List[float], toler
     return residual_norm < tolerance, residual_norm
 
 
-def create_initial_matrixis(matrix_height, matrix_width, fluid_cells_initial_velocity, fluid_inlet_velocity):
+def create_initial_matrixis(matrix_height, matrix_width, fluid_cells_initial_velocity, fluid_inlet_velocity, ref_n = 1):
 
     matrix_grid_coordinates = []
     matrix_grid_naming = []
@@ -95,16 +95,16 @@ def create_initial_matrixis(matrix_height, matrix_width, fluid_cells_initial_vel
     # Fill the walls (OWALL), beams (BEAM1), and fluid cells (FLUID)
     for i in range(0,matrix_height):
         for j in range(0,matrix_width):
-            if (i == 0 or i == matrix_height - 1 or j == matrix_width - 1): # Outer Walls
+            if ((i < ref_n)  or i >= matrix_height - ref_n or j >= matrix_width - ref_n): # Outer Walls
                 matrix_grid_naming[i][j] = 'OWALL'
                 matrix_grid_to_show[i][j] = 0
             elif ((i < matrix_height) and (i > int(matrix_height*0.4))) and ((j <  int(matrix_width*0.55)) and (j > int(matrix_width*0.43))): # Bottom beam
                 matrix_grid_naming[i][j] = 'BEAM1'
                 matrix_grid_to_show[i][j] = 1
-            elif ((i < matrix_height*0.5) and (i > 0)) and ((j <  matrix_width - 1) and (j > int(matrix_width*0.87))): # Top beam
+            elif ((i < matrix_height*0.5) and (i > 0)) and ((j <  matrix_width - ref_n) and (j > int(matrix_width*0.87))): # Top beam
                 matrix_grid_naming[i][j] = 'BEAM2'
                 matrix_grid_to_show[i][j] = 2
-            elif (i > 0 and i < matrix_height - 1 and j == 0):
+            elif (i > 0 and i < matrix_height - ref_n and j < ref_n):
                 matrix_grid_naming[i][j] = 'VELO0'
                 matrix_grid_to_show[i][j] = 3
             else:
